@@ -9,6 +9,11 @@ editor_options:
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
+library(knitr)
+library(lme4)
+library(performance)
+library(dplyr)
+
 ```
 
 # Introduction
@@ -57,7 +62,15 @@ Compare the model coefficients and the confidence intervals observed in this ass
 
 Read the datasets used in this assignment. Pay attention to the extensions of the datafiles.
 
-```{r}
+```{r data, include=FALSE}
+library(haven)
+
+data_A <- read_sav("~/elte-ppk-r-course-Fall-2025/data/assignment_4_dataset_A.sav")
+data_B <- read_sav("~/elte-ppk-r-course-Fall-2025/data/assignment_4_dataset_B.sav")
+
+
+glimpse(data_A)
+glimpse(data_B)
 
 ```
 
@@ -65,15 +78,214 @@ Read the datasets used in this assignment. Pay attention to the extensions of th
 
 Run an exploratory data analysis (EDA) to investigate the dataset.
 
-```{r}
+```{r EDA, echo = FALSE, warning=FALSE}
+
+library(dplyr)
+library(tidyr)
+library(knitr)
+
+num_vars <- data_A %>%
+  select(pain, age, STAI_trait, pain_cat, mindfulness,
+         cortisol_serum, cortisol_saliva)
+
+eda_table <- num_vars %>%
+  gather(variable, value) %>%
+  group_by(variable) %>%
+  summarise(
+    mean   = round(mean(value, na.rm = TRUE), 2),
+    sd     = round(sd(value, na.rm = TRUE), 2),
+    min    = round(min(value, na.rm = TRUE), 2),
+    q1     = round(quantile(value, 0.25, na.rm = TRUE), 2),
+    median = round(median(value, na.rm = TRUE), 2),
+    q3     = round(quantile(value, 0.75, na.rm = TRUE), 2),
+    max    = round(max(value, na.rm = TRUE), 2)
+  )
+
+kable(eda_table, caption = "Descriptive Statistics for Numeric Variables")
+
+table(data_A$sex, useNA = "ifany")
+table(data_A$hospital, useNA = "ifany")
+
+data_A %>% 
+  select(pain, age, STAI_trait, pain_cat, mindfulness,
+         cortisol_serum, cortisol_saliva) %>% 
+  pivot_longer(everything(),
+               names_to = "variable",
+               values_to = "value") %>% 
+  ggplot(aes(x = value)) +
+  geom_histogram(bins = 30, color = "white") +
+  facet_wrap(~ variable, scales = "free") +
+  theme_minimal() +
+  labs(
+    title = " Plots for Descriptive Statistics for Numeric Variables")
 
 ```
 
 ## Correct coding errors
 
-If you find values in the dataset during the EDA, that are not correct based on the provided descriptions of the variables of the dataset please correct them here.
+The sex variable originally contained multiple categories representing “male,” which were consolidated into a single category to ensure consistency in coding. Additionally, any test scores that fell outside the permissible range were corrected to align with valid measurement boundaries.
 
-```{r}
+```{r cleaning, include=FALSE}
+
+data_A <- data_A %>%
+  mutate(
+    sex = case_when(
+      sex %in% c("female", "Female", "woman", "Woman", "F", "f", 2) ~ "female",
+      sex %in% c("male", "Male", "man", "Man", "M", "m", 1) ~ "male",
+      TRUE ~ as.character(sex)
+    ),
+    sex = factor(sex),
+    hospital = factor(hospital)
+  ) %>%
+  
+  filter(
+    between(pain, 0, 10),
+    between(STAI_trait, 20, 80),
+    between(pain_cat, 0, 52),
+    between(mindfulness, 1, 6)
+  )
+
+data_B <- data_B %>%
+  mutate(
+    sex = case_when(
+      sex %in% c("female", "Female", "woman", "Woman", "F", "f", 2) ~ "female",
+      sex %in% c("male", "Male", "man", "Man", "M", "m", 1) ~ "male",
+      TRUE ~ as.character(sex)
+    ),
+    sex = factor(sex),
+    hospital = factor(hospital)
+  ) %>%
+  filter(
+    between(pain, 0, 10),
+    between(STAI_trait, 20, 80),
+    between(pain_cat, 0, 52),
+    between(mindfulness, 1, 6)
+  )
+
+table(data_A$sex)
+length(unique(data_A$hospital))
 
 ```
 
+## Mixed model and fixed model comparison
+
+A linear mixed model with a random intercept for hospital site was fitted to predict postoperative pain from demographic, psychological, and hormonal predictors. The model included age, sex, STAI-score, pain-catastrophizing, mindfulness, and cortisol serum, with hospital as a random intercept.
+
+### Mixed model interpretation
+
+```{r mixed model, include=FALSE}
+
+model_mixed <- lmer(
+  pain ~ age + sex + STAI_trait + pain_cat + mindfulness + cortisol_serum +
+    (1 | hospital),
+  data = data_A
+)
+summary(model_mixed)
+
+confint(model_mixed)
+
+VarCorr(model_mixed)
+
+r2_mixed <- r2(model_mixed)
+r2_mixed
+
+```
+
+```{r output, echo = FALSE}
+mixed_fixed <- data.frame(
+  Predictor = c("(Intercept)", "Age", "Sex (male)", "STAI_trait",
+                "Pain catastrophizing", "Mindfulness", "Serum cortisol"),
+  Estimate = c(3.502306, -0.054400, 0.297545, 0.001437,
+               0.036885, -0.262441, 0.610010),
+  Std_Error = c(1.380454, 0.019818, 0.190460, 0.023851,
+                0.028633, 0.100647, 0.114260),
+  t_value = c(2.537, -2.745, 1.562, 0.060,
+              1.288, -2.608, 5.339),
+  CI_lower = c(0.841537, -0.093638, -0.069567, -0.044728,
+               -0.018858, -0.457796, 0.388930),
+  CI_upper = c(6.203058, -0.016205, 0.671424, 0.047748,
+               0.092197, -0.067648, 0.831901)
+)
+
+kable(mixed_fixed, digits = 4,
+      caption = "Full Fixed-Effect Estimates for the Mixed Model")
+```
+
+A linear mixed-effects model predicting postoperative pain was fitted with age, sex, STAI-score, pain catastrophizing, mindfulness, and cortisol serum as fixed effects, and a random intercept for hospital. The model showed significant effects for age, mindfulness, and cortisol serum. Specifically, older age predicted lower pain (β = –0.054, SE = 0.020, 95% CI [–0.094, –0.016]), greater mindfulness predicted lower pain (β = –0.262, SE = 0.101, 95% CI [–0.458, –0.068]), while higher cortisol serum predicted higher pain levels (β = 0.610, SE = 0.114, 95% CI [0.389, 0.832]). Sex, STAI_trait, and pain catastrophizing did not significantly predict pain.
+
+The random intercept variance for hospitals was 0.313 (SD = 0.560), indicating substantial between-hospital variability.
+
+The model’s marginal R² was 0.317, indicating that the fixed effects alone accounted for 31.7% of the variance in postoperative pain. The conditional R² was 0.436, meaning that the combination of fixed and random effects explained 43.6% of the variance. This difference suggests that hospital-level clustering contributed an additional roughly 12% to the explained variance.
+
+### Comparison with fixed model
+
+```{r fixed model, include=FALSE}
+model_fixed <- lm(
+  pain ~ age + sex + STAI_trait + pain_cat + mindfulness + cortisol_serum,
+  data = data_A
+)
+
+summary(model_fixed)
+confint(model_fixed)
+r2_fixed <- r2(model_fixed)
+r2_fixed
+```
+
+```{r fixed model table, echo=FALSE}
+
+library(knitr)
+
+fixed_table <- data.frame(
+  Predictor = c("(Intercept)", "Age", "Sex (male)", "STAI_trait",
+                "Pain catastrophizing", "Mindfulness", "Serum cortisol"),
+  
+  Estimate = c(4.325976, -0.073839, 0.423139, 0.004017,
+               0.028886, -0.275654, 0.624228),
+  
+  Std_Error = c(1.458140, 0.020867, 0.203304, 0.025692,
+                0.030569, 0.107665, 0.122502),
+  
+  t_value = c(2.967, -3.539, 2.081, 0.156,
+              0.945, -2.560, 5.096),
+  
+  p_value = c(0.003390, 0.000504, 0.038725, 0.875921,
+              0.345864, 0.011223, 0.000000825),
+  
+  CI_lower = c(1.450041, -0.114995, 0.022155, -0.046656,
+               -0.031406, -0.488004, 0.382614),
+  
+  CI_upper = c(7.201911, -0.032683, 0.824122, 0.054690,
+               0.089179, -0.063304, 0.865842)
+)
+
+kable(fixed_table, digits = 4,
+      caption = "Fixed-Effect Estimates for Fixed Model")
+
+```
+
+
+The linear regression model predicting postoperative pain included age, sex, STAI-score, pain catastrophizing, mindfulness, and serum cortisol as predictors. Significant effects were found for age (β = –0.074, p < .001), sex (male higher pain; β = 0.423, p = .039), mindfulness (β = –0.276, p = .011), and cortisol serum (β = 0.624, p < .001). STAI-score and pain catastrophizing were not significant predictors. The model explained 35.7% of the variance (adjusted R² = .337).
+
+The fixed and mixed models showed highly consistent results: age, mindfulness, and cortisol serum were significant predictors in both, confirming their robustness. Sex was significant in the fixed model but not in the mixed model, indicating that sex differences in pain vary across hospitals rather than representing a stable individual effect. Overall variance explained was similar for the fixed effects, but the mixed model captured additional hospital-level variation and generalized well to the new dataset.
+
+## Prediction for Dataset B
+
+```{r predictions, echo = FALSE}
+data_B$predicted_pain <- predict(
+  model_mixed,
+  newdata = data_B,
+  allow.new.levels = TRUE  
+)
+
+RSS <- sum((data_B$pain - data_B$predicted_pain)^2)
+
+TSS <- sum((data_B$pain - mean(data_B$pain))^2)
+
+R2_B <- 1 - RSS / TSS
+```
+
+The model trained on sample A explains 35% of the variance in the new sample (R²=`r R2_B`)
+
+## Discussion
+
+Postoperative pain was moderately predictable from the psychological, hormonal, and demographic variables included in the model. The mixed-effects model trained on dataset A explained 31.7% of the variance with fixed effects only and 43.6% when accounting for hospital-level clustering. When the same model was applied to dataset B, it explained 35% of the variance, without being retrained. This indicates that the predictors generalize reasonably well to new patients and new hospital sites. The slight drop in explained variance is expected and suggests that some sample-specific variability was captured by the random intercepts in dataset A. Overall, these results support the robustness and external validity of the model across multiple clinical settings.
