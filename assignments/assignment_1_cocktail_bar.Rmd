@@ -31,15 +31,38 @@ Note: There are several different ways to solve these tasks, feel free to come u
 
 Read the cocktail dataset from: <https://github.com/nthun/cocktail-balance> You can also find the codebook there.
 
-```{r}
+```{r reading the data, include=FALSE}
+dt <- read.delim("https://raw.githubusercontent.com/nthun/cocktail-balance/refs/heads/master/cocktail_data.tsv")
 
+head(dt)
 ```
 
 ## 2. Transform the data table and clean the ingredient variable!
 
-The ingredients are currently in a single cell for each cocktail. It would be better to put them in separate rows. Also, the variable should be cleaned of all quantities (e.g. 1/2 oz, 2 dashes, etc.), and the indicator of alcohol content (e.g. 47.3% abv). You will need to use this cleaned table in later tasks.
+Here is the cleaned cocktail-repertoire:
 
-```{r}
+```{r task 2, echo=FALSE}
+library(tidyverse)
+
+dt_long <- dt %>%
+  separate_rows(ingredients, sep = "<br/>")
+
+dt_clean <- dt_long %>%
+  mutate(
+    ingredient = ingredients %>%
+      str_remove_all("\\d+\\s?\\d*/?\\d*\\s?oz") %>%  
+      str_remove_all("\\b\\d+\\.?\\d*\\b") %>%        
+      str_remove_all("\\(.*?% abv\\)") %>%  
+      str_remove_all("\\b(bsp|dash|dashes|drop|drops)\\b") %>%
+      str_remove_all("[[:punct:]]") %>%               
+      str_replace_all("^\\s+|^\\.+", "") %>% 
+      str_squish() %>%
+      str_to_title() 
+    
+  ) %>%
+  select(-ingredients)
+
+knitr::kable(dt_clean)
 
 ```
 
@@ -47,59 +70,103 @@ The ingredients are currently in a single cell for each cocktail. It would be be
 
 Before opening the bar, you need to find a reliable supplier that has all the ingredients. You need to send a list of all possible ingredients you will need. They don't need the quantities (i.e. how many of these are needed), just the names of the ingredients.
 
-```{r}
+```{r task 3, echo=FALSE}
+ingredient_list <- dt_clean %>%
+  distinct(ingredient) %>%    
+  arrange(ingredient)
 
+knitr::kable(ingredient_list)
 ```
 
 ## 4. Number of unique ingredients
 
-How many different ingredients you will need?
+This is the list of all the ingredients needed:
 
-```{r}
+```{r tak 4, include=FALSE}
+num_unique_ingredients <- count(ingredient_list)
+
+num_unique_ingredients
 
 ```
 
+We will need `r num_unique_ingredients` different ingredients.
+
+
 ## 5. What are the top 10 ingredients?
 
-What are the 10 most frequently used ingredients? If there are ties, you can list more than 10.
+The following are the 10 top ingredients:
 
-```{r}
+```{r task 5, echo=FALSE}
+top_10 <- dt_clean %>%
+  count(ingredient, sort = TRUE) %>%
+  slice_max(n, n = 10)
+
+knitr::kable(top_10)
 
 ```
 
 ## 6. Which cocktail(s) has/have the most ingredients?
 
-Count the number of ingredients and filter all the cocktails that has that many.
+The following drinks have the most ingredients, they all require 6 ingredients:
 
-```{r}
+```{r task 6, echo=FALSE}
+cocktail_counts <- dt_clean %>%
+  group_by(name) %>%
+  summarise(num_ingredients = n()) %>%
+  ungroup()
 
+max_ingredients <- max(cocktail_counts$num_ingredients)
+
+cocktails_most_ingredients <- cocktail_counts %>%
+  filter(num_ingredients == max_ingredients)
+
+knitr::kable(cocktails_most_ingredients)
 ```
 
 ## 7. How many ingredients appear in only one cocktail (rare ingredient)?
 
-Count all cocktails with only one ingredient, and
+```{r task 7, echo=FALSE}
+ingredient_usage <- dt_clean %>%
+  group_by(ingredient) %>%
+  summarise(num_cocktails = n_distinct(name)) %>%
+  ungroup()
 
-```{r}
+rare_ingredients <- ingredient_usage %>%
+  filter(num_cocktails == 1)
+
+num_rare_ingredients <- nrow(rare_ingredients)
 
 ```
 
+There are `r num_rare_ingredients` ingredients that are in only one cocktail.
+
 ## 8. Which cocktail has an ingredient that is only used in one cocktail?
 
-```{r}
+```{r task 8, echo=FALSE}
+cocktails_with_rare <- dt_clean %>%
+  filter(ingredient %in% rare_ingredients$ingredient) %>%
+  distinct(name, ingredient) %>%
+  arrange(name)
 
+knitr::kable(cocktails_with_rare)
 ```
 
 ## 9. What are the cocktails without rare ingredients?
 
-```{r}
+```{r task 9, echo=FALSE}
+cocktails_without_rare <- dt_clean %>%
+  group_by(name) %>%
+  filter(!any(ingredient %in% rare_ingredients$ingredient)) %>%
+  distinct(name) %>%
+  arrange(name)
+
+knitr::kable(cocktails_without_rare)
   
 ```
 
 ## 10. Create a cheat sheet for the bartender!
 
-Create a matrix that shows all cocktail names as rows and all ingredients as columns. When a cocktail requires an ingredient, there should be an "X" in the cell, otherwise, the cell should remain empty. Example:
-
-```{r echo=FALSE}
+```{r include=FALSE}
 tribble(~name, ~Lime, ~`White rum`, ~`Cane sugar`, ~`Coca-cola`, ~Mint, ~Soda,
         "Caipirissima", "X", "X", "X", "", "", "",
         "Cuba Libre", "X", "X", "", "X","","",
@@ -107,8 +174,22 @@ tribble(~name, ~Lime, ~`White rum`, ~`Cane sugar`, ~`Coca-cola`, ~Mint, ~Soda,
     relocate(name, sort(names(.)))
 ```
 
-```{r}
+```{r task 10, echo=FALSE}
+library(dplyr)
+library(tidyr)
 
+cocktail_matrix <- dt_clean %>%
+  select(name, ingredient) %>%
+  mutate(present = "X") %>%
+  distinct() %>%
+  complete(name, ingredient, fill = list(present = "")) %>%
+  pivot_wider(
+    names_from = ingredient,
+    values_from = present
+  ) %>%
+  relocate(name)
+
+knitr::kable(cocktail_matrix)
 ```
 
 
